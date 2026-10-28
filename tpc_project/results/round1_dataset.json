@@ -1,0 +1,11 @@
+{
+  "n_samples": 216,
+  "n_patients": 99,
+  "n_deaths": 13,
+  "death_rate": 0.06018518518518518,
+  "n_features": 27,
+  "hours_min": 1,
+  "hours_median": 30.5,
+  "hours_max": 48,
+  "zero_share": 0.7235795538923044
+}
