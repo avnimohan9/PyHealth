@@ -29,7 +29,7 @@ files**: each has its purpose at the top, the structure in place, and `TODO`s to
 | `README.md` | This guide |
 | `notebooks/model_dev.ipynb` | **Where we write the code.** One cell per piece of the PR files; Build turns them into `.py` files and runs the tests; Export pushes them to GitHub |
 | `notebooks/00_setup_and_tests.ipynb` | Check the setup: Drive, latest code, tests, data files |
-| `notebooks/01_data_check.ipynb` | Download MIMIC-IV into Drive (once), load it and print aggregate counts; optional smaller `labevents` copy |
+| `notebooks/01_data_check.ipynb` | Load the uploaded MIMIC-IV and print aggregate counts; optional smaller `labevents` copy (its download cell is only a fallback) |
 | `notebooks/02_experiments.ipynb` | Train and test on GPU; each person runs their share of configs |
 | `notebooks/03_results.ipynb` | Combine everyone's CSVs into the results tables |
 
@@ -37,7 +37,7 @@ files**: each has its purpose at the top, the structure in place, and `TODO`s to
 
 - [Model dev (shared code notebook)](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/model_dev.ipynb): open once, **File → Save a copy in Drive**, move the copy into `DL4H_TPC/notebooks/`. Everyone then opens **that** shared copy, not their own.
 - [00 · Setup and tests](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/00_setup_and_tests.ipynb)
-- [01 · Data download and check](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/01_data_check.ipynb)
+- [01 · Data check](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/01_data_check.ipynb)
 - [02 · Experiments](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/02_experiments.ipynb)
 - [03 · Results](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/03_results.ipynb)
 
@@ -53,8 +53,8 @@ Suggested Drive layout (folder name is set at the top of each notebook):
 
 ```
 DL4H_TPC/
-  mimiciv/2.2/hosp/   patients, admissions, labevents, d_labitems
-  mimiciv/2.2/icu/    icustays
+  mimiciv/2.2/hosp/   all of MIMIC-IV hosp (uploaded by a teammate, .csv.gz)
+  mimiciv/2.2/icu/    all of MIMIC-IV icu
   results/            results_<name>.csv, one per person
   notebooks/          the ONE shared model_dev notebook (+ your own copies of 00-03 if you like)
   code/               latest .py files built by model_dev (written automatically)
