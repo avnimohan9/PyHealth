@@ -27,13 +27,15 @@ files**: each has its purpose at the top, the structure in place, and `TODO`s to
 | File | Purpose |
 |---|---|
 | `README.md` | This guide |
-| `notebooks/00_setup_and_tests.ipynb` | Get the code into Colab, install, run tests, check data; optional push of code edits |
+| `notebooks/model_dev.ipynb` | **Where we write the code.** One cell per piece of the PR files; Build turns them into `.py` files and runs the tests; Export pushes them to GitHub |
+| `notebooks/00_setup_and_tests.ipynb` | Check the setup: Drive, latest code, tests, data files |
 | `notebooks/01_data_check.ipynb` | Download MIMIC-IV into Drive (once), load it and print aggregate counts; optional smaller `labevents` copy |
 | `notebooks/02_experiments.ipynb` | Train and test on GPU; each person runs their share of configs |
 | `notebooks/03_results.ipynb` | Combine everyone's CSVs into the results tables |
 
 **Open in Colab** (one click each, then **File → Save a copy in Drive** so your edits are kept):
 
+- [Model dev (shared code notebook)](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/model_dev.ipynb): open once, **File → Save a copy in Drive**, move the copy into `DL4H_TPC/notebooks/`. Everyone then opens **that** shared copy, not their own.
 - [00 · Setup and tests](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/00_setup_and_tests.ipynb)
 - [01 · Data download and check](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/01_data_check.ipynb)
 - [02 · Experiments](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/02_experiments.ipynb)
@@ -54,18 +56,22 @@ DL4H_TPC/
   mimiciv/2.2/hosp/   patients, admissions, labevents, d_labitems
   mimiciv/2.2/icu/    icustays
   results/            results_<name>.csv, one per person
+  notebooks/          the ONE shared model_dev notebook (+ your own copies of 00-03 if you like)
+  code/               latest .py files built by model_dev (written automatically)
 ```
 
 ## Workflow
 
-**Writing code** (`tpc.py`, the tests, the example script):
+**Writing code** happens in the **shared `model_dev` notebook** in Drive:
 
-- Edit on GitHub (pencil icon), in VS Code (Live Share lets us type together live), or in Colab's file
-  browser and push with the last section of `00_setup_and_tests`.
-- One person per file at a time. Say in the group chat what you're working on.
-- Run the tests before pushing: `python -m pytest tests/core/test_tpc.py -q`.
-- Bigger changes: make a small branch off `tpc-dev` and open a PR into `tpc-dev` inside our fork, so
-  someone can look first.
+- `tpc.py` is split over 4 cells (header, `MaskedNorm1d`, `TPCLayer`, `TPC`); the tests and the example
+  script have one cell each.
+- Claim a cell in the group chat before editing it. Colab doesn't merge two people typing in one cell.
+- After editing: run your cell, then **Build**. Build writes the real `.py` files, saves a copy to
+  `DL4H_TPC/code/` (the other notebooks load it from there) and runs the tests.
+- When a piece works, run **Export** to push the `.py` files to GitHub. At the end, Export is how the
+  code gets into the PR.
+- While the notebook holds the newest code, GitHub's `.py` files may lag behind; that's expected.
 
 **Running experiments** (Colab, `02_experiments`):
 
@@ -78,13 +84,13 @@ on cells that touch the data, never commit data to GitHub.
 
 ## Suggested order
 
-1. **Model** (`tpc.py`): `MaskedNorm1d` → `TPCLayer` → `TPC`. Use the authors' `temp_pointwise()` as
+1. **Model** (`tpc.py`, in `model_dev`): `MaskedNorm1d` → `TPCLayer` → `TPC`. Use the authors' `temp_pointwise()` as
    the reference for one layer.
 2. **Tests** (`test_tpc.py`): replace each `skipTest("TODO")` as the model takes shape.
 3. **Example script**: `load_samples`, `run_one`, `main`; check with `--smoke` on the data.
 4. **Experiments** on full MIMIC-IV in Colab, split across the three of us.
 5. **Results** into the example's RESULTS section; slides for the video.
-6. **PR**: make a clean branch from `tpc-dev`, delete `tpc_project/`, rebase on upstream `master`, run
+6. **PR**: run **Export** in `model_dev` so GitHub has the final `.py` files, then make a clean branch from `tpc-dev`, delete `tpc_project/`, rebase on upstream `master`, run
    the tests, open the PR with "Allow edits by maintainers" ticked.
 
 ## Setup on your own computer (optional)
