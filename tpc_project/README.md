@@ -28,13 +28,16 @@ files**: each has its purpose at the top, the structure in place, and `TODO`s to
 |---|---|
 | `README.md` | This guide |
 | `notebooks/00_setup_and_tests.ipynb` | Get the code into Colab, install, run tests, check data; optional push of code edits |
-| `notebooks/01_data_check.ipynb` | Load MIMIC-IV and print aggregate counts; optional smaller `labevents` copy |
+| `notebooks/01_data_check.ipynb` | Download MIMIC-IV into Drive (once), load it and print aggregate counts; optional smaller `labevents` copy |
 | `notebooks/02_experiments.ipynb` | Train and test on GPU; each person runs their share of configs |
 | `notebooks/03_results.ipynb` | Combine everyone's CSVs into the results tables |
 
-Open a notebook in Colab: **File → Open notebook → GitHub**, paste
-`https://github.com/avnimohan9/PyHealth/tree/tpc-dev`, pick the notebook. Then **File → Save a copy in
-Drive** so your edits are kept.
+**Open in Colab** (one click each, then **File → Save a copy in Drive** so your edits are kept):
+
+- [00 · Setup and tests](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/00_setup_and_tests.ipynb)
+- [01 · Data download and check](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/01_data_check.ipynb)
+- [02 · Experiments](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/02_experiments.ipynb)
+- [03 · Results](https://colab.research.google.com/github/avnimohan9/PyHealth/blob/tpc-dev/tpc_project/notebooks/03_results.ipynb)
 
 ## What lives where
 
