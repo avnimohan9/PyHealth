@@ -15,10 +15,10 @@ Experiments:
     2. Hyperparameter sweep: one TPC setting changed at a time (dropout,
        temp_channels, point_size, learning rate).
 
-Usage (MIMIC4_ROOT = the MIMIC-IV folder containing hosp/ and icu/):
-    export MIMIC4_ROOT=/path/to/mimiciv/2.2
-    python examples/mimic4_mortality_tpc.py --smoke
-    python examples/mimic4_mortality_tpc.py --configs tpc lstm --csv my.csv
+Usage (--root = the MIMIC-IV folder containing hosp/ and icu/):
+    python examples/mimic4_mortality_tpc.py --root /path/to/mimiciv/2.2 --smoke
+    python examples/mimic4_mortality_tpc.py --root /path/to/mimiciv/2.2 \
+        --cache-dir /path/to/cache --configs tpc lstm --csv my.csv
 
 Only aggregate counts and scores are printed, never patient rows.
 
@@ -29,15 +29,11 @@ STATUS: shell. Structure and configs are set; function bodies are TODO.
 """
 
 import argparse
-import os
 
 from pyhealth.datasets import MIMIC4EHRDataset, get_dataloader, split_by_patient
 from pyhealth.models import RNN, TCN, TPC, Transformer
 from pyhealth.tasks import InHospitalMortalityMIMIC4
 from pyhealth.trainer import Trainer
-
-MIMIC4_ROOT = os.environ.get("MIMIC4_ROOT")
-CACHE_DIR = os.environ.get("TPC_CACHE_DIR", os.path.expanduser("~/.cache/tpc"))
 
 # Default TPC settings; every sweep config changes exactly one of these.
 TPC_BASE = dict(
@@ -68,10 +64,15 @@ CONFIGS = {
 }
 
 
-def load_samples():
-    """Loads MIMIC-IV and applies the in-hospital mortality task."""
-    # TODO: MIMIC4EHRDataset(root=MIMIC4_ROOT, tables=["labevents"],
-    # cache_dir=CACHE_DIR).set_task(InHospitalMortalityMIMIC4())
+def load_samples(root, cache_dir=None):
+    """Loads MIMIC-IV and applies the in-hospital mortality task.
+
+    Args:
+        root: MIMIC-IV folder containing hosp/ and icu/.
+        cache_dir: where PyHealth keeps its processed copy (optional).
+    """
+    # TODO: MIMIC4EHRDataset(root=root, tables=["labevents"],
+    # cache_dir=cache_dir).set_task(InHospitalMortalityMIMIC4())
     raise NotImplementedError
 
 
@@ -86,14 +87,17 @@ def run_one(name, samples, seed, args):
 def main():
     """Parses arguments and runs the chosen configs and seeds."""
     parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True, help="MIMIC-IV folder (hosp/, icu/)")
+    parser.add_argument("--cache-dir", default=None, help="PyHealth cache folder")
     parser.add_argument("--configs", nargs="*", default=list(CONFIGS))
     parser.add_argument("--seeds", nargs="*", type=int, default=[0, 1, 2])
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--smoke", action="store_true", help="1 seed, 2 epochs")
     parser.add_argument("--csv", default="tpc_results.csv")
     args = parser.parse_args()
-    # TODO: load samples once, loop configs x seeds, append rows to args.csv,
-    # skip rows already in the CSV so a crashed run can resume.
+    # TODO: load samples once with load_samples(args.root, args.cache_dir),
+    # loop configs x seeds, append rows to args.csv, and skip rows already in
+    # the CSV so a crashed run can resume.
     raise NotImplementedError
 
 

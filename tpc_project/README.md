@@ -58,6 +58,7 @@ DL4H_TPC/
   results/            results_<name>.csv, one per person
   notebooks/          the ONE shared model_dev notebook (+ your own copies of 00-03 if you like)
   code/               latest .py files built by model_dev (written automatically)
+  cache/              PyHealth's processed copy of the data (built on first load; MIMIC-derived, never share)
 ```
 
 ## Workflow
