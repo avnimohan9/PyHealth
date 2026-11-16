@@ -1,0 +1,277 @@
+"""TPC on MIMIC-IV in-hospital mortality: model comparison and hyperparameter sweep.
+
+PURPOSE OF THIS FILE
+    The example script the rubric requires (named
+    examples/{dataset}_{task_name}_{model}.py). It runs every experiment:
+    trains each configuration, tests it, and appends one row of scores per
+    run to a CSV. Our final findings go in the RESULTS section below.
+
+Paper: Rocheteau, Lio & Hyland, "Temporal Pointwise Convolutional Networks for
+Length of Stay Prediction in the Intensive Care Unit", CHIL 2021.
+https://arxiv.org/abs/2007.09483
+
+Experiments:
+    1. Model comparison: TPC vs. PyHealth's LSTM, Transformer and TCN.
+    2. Hyperparameter sweep: one TPC setting changed at a time (dropout,
+       temp_channels, point_size, learning rate).
+
+Data folder (must contain hosp/ and icu/), in priority order:
+    --root PATH   (e.g. the filtered copy)
+    --smoke       -> MIMIC4_DEMO_ROOT (the open-access demo)
+    otherwise     -> MIMIC4_ROOT (full MIMIC-IV v2.2)
+Defaults point at the team's shared Google Drive; set the environment
+variables to run elsewhere.
+
+Usage:
+    python examples/mimic4_mortality_tpc.py --smoke
+    python examples/mimic4_mortality_tpc.py --root /path/to/v2.2_filtered
+    python examples/mimic4_mortality_tpc.py --configs tpc lstm --csv my.csv
+
+Only aggregate counts and scores are printed, never patient rows.
+
+RESULTS
+    TODO: fill in the summary table once the full MIMIC-IV runs are done.
+
+STATUS: implemented; full-data results still to be collected.
+"""
+
+import argparse
+import csv
+import hashlib
+import os
+import random
+import time
+
+import numpy as np
+import torch
+
+from pyhealth.datasets import MIMIC4EHRDataset, get_dataloader, split_by_patient
+from pyhealth.models import RNN, TCN, TPC, Transformer
+from pyhealth.tasks import InHospitalMortalityMIMIC4
+from pyhealth.trainer import Trainer
+
+# Defaults point at the team's shared Google Drive (mounted in Colab).
+# An environment variable or --root overrides them.
+DRIVE_FOLDER = os.environ.get("TPC_DRIVE_FOLDER", "/content/drive/MyDrive/DL4H_TPC")
+MIMIC4_ROOT = os.environ.get("MIMIC4_ROOT", f"{DRIVE_FOLDER}/mimiciv/mimic-iv-2.2")
+MIMIC4_DEMO_ROOT = os.environ.get("MIMIC4_DEMO_ROOT", f"{DRIVE_FOLDER}/mimiciv/Demo")
+CACHE_DIR = os.environ.get("TPC_CACHE_DIR", os.path.expanduser("~/.cache/tpc"))
+
+# Default TPC settings; every sweep config changes exactly one of these.
+TPC_BASE = dict(
+    num_layers=5,
+    dilation="linear",
+    kernel_size=4,
+    temp_channels=8,
+    point_size=16,
+    dropout=0.3,
+)
+
+# name -> (model class, model kwargs). "lr" is passed to the optimizer,
+# so run_one pops it out of the kwargs before building the model.
+CONFIGS = {
+    # Experiment 1: model comparison
+    "tpc": (TPC, dict(TPC_BASE)),
+    "lstm": (RNN, dict(rnn_type="LSTM")),
+    "transformer": (Transformer, dict()),
+    "tcn": (TCN, dict()),
+    # Experiment 2: hyperparameter sweep (values to finalize as a team)
+    "dropout_0.0": (TPC, dict(TPC_BASE, dropout=0.0)),
+    "dropout_0.5": (TPC, dict(TPC_BASE, dropout=0.5)),
+    "temp_channels_4": (TPC, dict(TPC_BASE, temp_channels=4)),
+    "temp_channels_16": (TPC, dict(TPC_BASE, temp_channels=16)),
+    "point_size_8": (TPC, dict(TPC_BASE, point_size=8)),
+    "point_size_32": (TPC, dict(TPC_BASE, point_size=32)),
+    "lr_1e-4": (TPC, dict(TPC_BASE, lr=1e-4)),
+    "lr_1e-2": (TPC, dict(TPC_BASE, lr=1e-2)),
+}
+DEFAULT_LR = 1e-3
+
+CSV_FIELDS = [
+    "config", "seed", "epochs", "lr", "n_train", "n_val", "n_test",
+    "test_deaths", "n_params", "test_auroc", "test_auprc", "seconds",
+]
+
+
+def resolve_root(root=None, smoke=False):
+    """Picks and checks the MIMIC-IV folder to load."""
+    root = root or (MIMIC4_DEMO_ROOT if smoke else MIMIC4_ROOT)
+    if not root:
+        raise SystemExit(
+            "No data folder. Pass --root, or set MIMIC4_ROOT (full) / "
+            "MIMIC4_DEMO_ROOT (used with --smoke)."
+        )
+    missing = [d for d in ("hosp", "icu") if not os.path.isdir(os.path.join(root, d))]
+    if missing:
+        raise SystemExit(f"{root} is missing {missing}; point to the folder that contains hosp/ and icu/.")
+    # labevents may be .csv or .csv.gz depending on the download
+    hosp = os.listdir(os.path.join(root, "hosp"))
+    if not any(f.startswith("labevents") for f in hosp):
+        raise SystemExit(f"No labevents file in {root}/hosp (found: {sorted(hosp)[:8]}...).")
+    # MIMIC-IV v2.x keeps patients/admissions in hosp/; v0.4-v1.0 keep them in core/.
+    if not any(f.startswith("patients") for f in hosp):
+        core = os.path.join(root, "core")
+        hint = " (found in core/: pre-2.0 layout)" if os.path.isdir(core) and any(
+            f.startswith("patients") for f in os.listdir(core)) else ""
+        raise SystemExit(f"hosp/ has no patients file{hint}. PyHealth's MIMIC4EHRDataset expects the v2.x layout.")
+    return root
+
+
+def load_samples(root=None, smoke=False):
+    """Loads MIMIC-IV labevents and applies the in-hospital mortality task.
+
+    Returns the SampleDataset. Prints only aggregate counts, never patient rows.
+    """
+    root = resolve_root(root, smoke)
+    # Separate cache per root so demo / filtered / full never share cached files.
+    tag = hashlib.md5(os.path.abspath(root).encode()).hexdigest()[:8]
+    cache_dir = os.path.join(CACHE_DIR, tag)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    dataset = MIMIC4EHRDataset(
+        root=root,
+        tables=["labevents"],
+        cache_dir=cache_dir,
+    )
+    samples = dataset.set_task(InHospitalMortalityMIMIC4())
+
+    n = len(samples)
+    deaths = sum(int(samples[i]["mortality"]) for i in range(n))
+    print(f"[data] root={root}")
+    print(f"[data] stays={n}, deaths={deaths} ({deaths / max(n, 1):.1%})")
+    return samples
+
+
+def set_seed(seed):
+    """Seeds python, numpy and torch."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+def measured_means(dataset, n_features=27):
+    """Per-feature mean over measured (nonzero) values; 1.0 for features never measured."""
+    total = torch.zeros(n_features)
+    count = torch.zeros(n_features)
+    for i in range(len(dataset)):
+        x = dataset[i]["labs"]
+        total += x.sum(dim=0)
+        count += (x != 0).sum(dim=0)
+    return torch.where(count > 0, total / count.clamp(min=1), torch.ones(n_features))
+
+
+def with_input_scale(model_cls):
+    """Subclass that divides the lab inputs by self.scale before the usual forward pass."""
+    class Scaled(model_cls):
+        def forward(self, **kwargs):
+            key = self.feature_keys[0]
+            kwargs[key] = kwargs[key].to(self.scale.device).float() / self.scale
+            return super().forward(**kwargs)
+    Scaled.__name__ = model_cls.__name__
+    return Scaled
+
+def count_deaths(dataset):
+    """Number of positive labels in a (sub)dataset."""
+    return sum(int(dataset[i]["mortality"]) for i in range(len(dataset)))
+
+
+def run_one(name, samples, seed, args):
+    """Trains and tests one configuration; returns one results row (dict)."""
+    set_seed(seed)
+    model_cls, kwargs = CONFIGS[name]
+    kwargs = dict(kwargs)
+    lr = kwargs.pop("lr", DEFAULT_LR)  # lr belongs to the optimizer, not the model
+
+    train_ds, val_ds, test_ds = split_by_patient(samples, [0.7, 0.1, 0.2], seed=seed)
+    train_dl = get_dataloader(train_ds, batch_size=args.batch_size, shuffle=True)
+    val_dl = get_dataloader(val_ds, batch_size=args.batch_size, shuffle=False)
+    test_dl = get_dataloader(test_ds, batch_size=args.batch_size, shuffle=False)
+
+    scale = measured_means(train_ds)  # train split only, so nothing leaks from val/test
+    model = with_input_scale(model_cls)(dataset=samples, **kwargs)
+    model.register_buffer("scale", scale)
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    trainer = Trainer(model=model, metrics=["roc_auc", "pr_auc"])
+    start = time.time()
+    trainer.train(
+        train_dataloader=train_dl,
+        val_dataloader=val_dl,
+        epochs=args.epochs,
+        optimizer_params={"lr": lr},
+        monitor="roc_auc",
+        monitor_criterion="max",
+    )
+    scores = trainer.evaluate(test_dl)
+
+    return {
+        "config": name,
+        "seed": seed,
+        "epochs": args.epochs,
+        "lr": lr,
+        "n_train": len(train_ds),
+        "n_val": len(val_ds),
+        "n_test": len(test_ds),
+        "test_deaths": count_deaths(test_ds),
+        "n_params": n_params,
+        "test_auroc": float(scores["roc_auc"]),
+        "test_auprc": float(scores["pr_auc"]),
+        "seconds": round(time.time() - start, 1),
+    }
+
+
+def finished_runs(csv_path):
+    """Set of (config, seed) pairs already in the CSV, so a crashed run can resume."""
+    if not os.path.exists(csv_path):
+        return set()
+    with open(csv_path, newline="") as f:
+        return {(r["config"], int(r["seed"])) for r in csv.DictReader(f)}
+
+
+def append_row(csv_path, row):
+    """Appends one results row, writing the header if the file is new."""
+    is_new = not os.path.exists(csv_path) or os.path.getsize(csv_path) == 0
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        if is_new:
+            writer.writeheader()
+        writer.writerow(row)
+
+
+def main():
+    """Parses arguments and runs the chosen configs and seeds."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--configs", nargs="*", default=list(CONFIGS))
+    parser.add_argument("--seeds", nargs="*", type=int, default=[0, 1, 2])
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--smoke", action="store_true", help="1 seed, 2 epochs, demo data")
+    parser.add_argument("--root", default=None, help="MIMIC-IV folder (overrides env vars)")
+    parser.add_argument("--csv", default="tpc_results.csv")
+    args = parser.parse_args()
+
+    unknown = [c for c in args.configs if c not in CONFIGS]
+    if unknown:
+        raise SystemExit(f"Unknown configs {unknown}; choose from {list(CONFIGS)}")
+    if args.smoke:
+        args.seeds, args.epochs = args.seeds[:1], 2
+
+    samples = load_samples(root=args.root, smoke=args.smoke)
+    done = finished_runs(args.csv)
+
+    for name in args.configs:
+        for seed in args.seeds:
+            if (name, seed) in done:
+                print(f"[skip] {name} seed={seed} (already in {args.csv})")
+                continue
+            row = run_one(name, samples, seed, args)
+            append_row(args.csv, row)
+            print(
+                f"[done] {name} seed={seed}: AUROC={row['test_auroc']:.3f} "
+                f"AUPRC={row['test_auprc']:.3f} ({row['seconds']}s)"
+            )
+
+
+if __name__ == "__main__":
+    main()
